@@ -1,13 +1,16 @@
-import os
+import os, jwt
 from flask import Flask, request
 from db import db, db_init
 from marshmallow import Schema, fields, ValidationError
 from flask_bcrypt import Bcrypt
+from datetime import datetime
+
 
 app = Flask(__name__)
 
 database_url = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+print(database_url)
 db.init_app(app)
 bcrypt = Bcrypt()
 
@@ -71,6 +74,7 @@ def register():
     }, 201
 
 
+# User Login
 class UserLoginSchema(Schema):
     username = fields.Str(required=True)
     password = fields.Str(required=True)
@@ -86,20 +90,105 @@ def login():
         return {"error": err.messages}, 400
 
     user = User.query.filter_by(username=data["username"]).first()
-    if user and bcrypt.check_password_hash(user.password, data["password"]):
-        return {"message": "User logged in successfully"}, 200
-    else:
+    if not user and bcrypt.check_password_hash(user.password, data["password"]):
         return {"error": "Invalid username or password"}, 401
 
+    payload = {
+        "user_id": user.user_id,
+        "username": user.username,
+        "bio": user.bio,
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(seconds=300),
+    }
+    token = jwt.encode(payload, os.getenv("SECRET_KEY"), algorithm="HS256")
 
+    return {
+        "token": token,
+    }
+
+
+# Post a Tweet
 class TweetSchema(Schema):
     tweet = fields.Str(required=True)
 
 
 @app.route("/tweets", methods=["POST"])
-def create_tweet():
-    data = request.get_
+def tweet():
+    data = request.get_json()
+    schema = TweetSchema()
+    try:
+        schema.load(data)
+    except ValidationError as err:
+        return {"error": err.messages}, 400
+    if not request.headers.get("Authorization"):
+        return {"error": "Not authorized"}, 401
+    user_id = jwt.decode(
+        request.headers.get("Authorization"),
+        os.getenv("SECRET_KEY"),
+        algorithms="HS256",
+    )["user_id"]
+    tweet = Tweet(published_at=datetime.now(), tweet=data["tweet"], user_id=user_id)
+    if len(tweet.tweet) > 150:
+        return {"error": "Tweet cannot be more than 150 characters"}, 400
+    db.session.add(tweet)
+    db.session.commit()
+    return {
+        "id": tweet.id,
+        "published_at": tweet.published_at,
+        "tweet": tweet.tweet,
+    }
 
 
-with app.app_context():
-    db_init()
+# Following & Unfollow
+@app.route("/follow", methods=["POST"])
+def follow():
+    data = request.get_json()
+    if not request.headers.get("Authorization"):
+        return {"error": "Not authorized"}, 401
+    user_id = jwt.decode(
+        request.headers.get("Authorization"),
+        os.getenv("SECRET_KEY"),
+        algorithms="HS256",
+    )["user_id"]
+    if data["follower_id"] != user_id:
+        return {"error": "Not authorized"}, 401
+    if data["follower_id"] == data["following_id"]:
+        return {"error": "Cannot follow yourself"}, 400
+    if Follow.query.filter_by(
+        follower_id=data["follower_id"], following_id=data["following_id"]
+    ).first():
+        Follow.query.filter_by(
+            follower_id=data["follower_id"], following_id=data["following_id"]
+        ).delete()
+        return {"following_status": "Unfollowed"}
+    follow = Follow(follower_id=data["follower_id"], following_id=data["following_id"])
+    db.session.add(follow)
+    db.session.commit()
+    return {"following_status": "Followed"}
+
+
+# User Profiles
+@app.route("/user", methods=["GET"])
+def profile():
+    if not request.headers.get("Authorization"):
+        return {"error": "Not authorized"}, 401
+    user_id = jwt.decode(
+        request.headers.get("Authorization"),
+        os.getenv("SECRET_KEY"),
+        algorithms="HS256",
+    )["user_id"]
+    user = User.query.filter_by(user_id=user_id).first()
+    return {
+        "user_id": user.user_id,
+        "username": user.username,
+        "bio": user.bio,
+        "following": Follow.query.filter(user_id == Follow.follower_id).count(),
+        "followers": Follow.query.filter(user_id == Follow.following_id).count(),
+        "tweets": Tweet.query.filter_by(user_id=user_id)
+        .order_by(Tweet.published_at.desc())
+        .limit(10)
+        .all(),
+    }
+
+
+# with app.app_context():
+#     db_init()
