@@ -51,7 +51,8 @@ def login():
         "user_id": user.user_id,
         "username": user.username,
         "bio": user.bio,
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(seconds=300),
+        "exp": datetime.datetime.utcnow()
+        + datetime.timedelta(hours=5),  # Ganti jadi 10 mins aja nanti
     }
     token = jwt.encode(payload, os.getenv("SECRET_KEY"), algorithm="HS256")
 

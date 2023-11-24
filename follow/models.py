@@ -17,3 +17,9 @@ class Follow(db.Model):
     following = db.relationship(
         "User", foreign_keys=[following_id], backref=db.backref("following", lazy=True)
     )
+
+
+class FollowSchema(Schema):
+    id = fields.Int(dump_only=True)
+    follower_id = fields.Int(required=True)
+    following_id = fields.Int(required=True)

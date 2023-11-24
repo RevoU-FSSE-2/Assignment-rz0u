@@ -9,22 +9,40 @@ user_bp = Blueprint("user", __name__)
 
 @user_bp.route("", methods=["GET"])
 def profile():
-    if not request.headers.get("Authorization"):
+    authorization_header = request.headers.get("Authorization")
+    if not authorization_header:
         return {"error": "Not authorized"}, 401
+
+    token = authorization_header.split(" ")[1]
+
     user_id = jwt.decode(
-        request.headers.get("Authorization"),
+        token,
         os.getenv("SECRET_KEY"),
         algorithms="HS256",
     )["user_id"]
     user = User.query.filter_by(user_id=user_id).first()
+
+    tweets = (
+        Tweet.query.filter_by(user_id=user_id)
+        .order_by(Tweet.published_at.desc())
+        .limit(10)
+        .all()
+    )
+    tweet_list = []
+
+    for tweet in tweets:
+        tweet_dict = {
+            "id": tweet.id,
+            "published_at": tweet.published_at,
+            "tweet": tweet.tweet,
+        }
+        tweet_list.append(tweet_dict)
+
     return {
         "user_id": user.user_id,
         "username": user.username,
         "bio": user.bio,
         "following": Follow.query.filter(user_id == Follow.follower_id).count(),
         "followers": Follow.query.filter(user_id == Follow.following_id).count(),
-        "tweets": Tweet.query.filter_by(user_id=user_id)
-        .order_by(Tweet.published_at.desc())
-        .limit(10)
-        .all(),
+        "tweets": tweet_list,
     }
