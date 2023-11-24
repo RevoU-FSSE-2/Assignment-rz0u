@@ -14,12 +14,15 @@ def profile():
         return {"error": "Not authorized"}, 401
 
     token = authorization_header.split(" ")[1]
+    try:
+        token_data = jwt.decode(token, os.getenv("SECRET_KEY"), algorithms="HS256")
+        print(token_data)
+    except jwt.ExpiredSignatureError:
+        return {"error": "Token expired"}, 401
+    except jwt.InvalidTokenError:
+        return {"error": "Invalid token"}, 401
 
-    user_id = jwt.decode(
-        token,
-        os.getenv("SECRET_KEY"),
-        algorithms="HS256",
-    )["user_id"]
+    user_id = token_data["user_id"]
     user = User.query.filter_by(user_id=user_id).first()
 
     tweets = (

@@ -27,12 +27,14 @@ def follow():
 
     token = authorization_header.split(" ")[1]
 
-    user_id = jwt.decode(
-        token,
-        os.getenv("SECRET_KEY"),
-        algorithms="HS256",
-    )["user_id"]
-    print(user_id)
+    try:
+        token_data = jwt.decode(token, os.getenv("SECRET_KEY"), algorithms="HS256")
+    except jwt.ExpiredSignatureError:
+        return {"error": "Token expired"}, 401
+    except jwt.InvalidTokenError:
+        return {"error": "Invalid token"}, 401
+
+    user_id = token_data["user_id"]
 
     if data["follower_id"] != user_id:
         return {"error": "Not authorized"}, 401
@@ -40,16 +42,22 @@ def follow():
     if data["follower_id"] == data["following_id"]:
         return {"error": "Cannot follow yourself"}, 400
 
-    if Follow.query.filter_by(
+    followed = Follow.query.filter_by(
         follower_id=data["follower_id"], following_id=data["following_id"]
-    ).first():
-        Follow.query.filter_by(
-            follower_id=data["follower_id"], following_id=data["following_id"]
-        ).delete()
-        return {"following_status": "Unfollowed"}
+    ).first()
+
+    unfollow = Follow.query.filter_by(
+        follower_id=data["follower_id"], following_id=data["following_id"]
+    ).delete()
 
     follow = Follow(follower_id=data["follower_id"], following_id=data["following_id"])
 
-    db.session.add(follow)
-    db.session.commit()
-    return {"following_status": "Followed"}
+    if followed:
+        unfollow
+        db.session.commit()
+        return {"following_status": "Unfollowed"}
+    else:
+        follow
+        db.session.add(follow)
+        db.session.commit()
+        return {"following_status": "Followed"}
